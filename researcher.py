@@ -5,11 +5,13 @@ import subprocess
 import requests
 
 class Researcher:
-    def __init__(self, model_path="vicgalle/gpt-neo-2.7B", maxlen=2048):
+    def __init__(self, model_path="vicgalle/Mixtral-7Bx2-truthy", code_model_path="Phind/Phind-CodeLlama-34B-v2", maxlen=1024):
         self.model_path = model_path
         self.maxlen = maxlen
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForCausalLM.from_pretrained(model_path)
+        self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
+        self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
+        self.code_model = AutoModelForCausalLM.from_pretrained(code_model_path, device_map='auto')
         set_seed(42)
 
     def read_file_contents(self, filename):
@@ -47,9 +49,15 @@ class Researcher:
         return text
 
     def generate_text(self, prompt):
-        inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
-        outputs = self.model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
-        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        inputs = self.language_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
+        outputs = self.language_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
+        generated_text = self.language_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return generated_text
+    
+    def generate_code(self, prompt):
+        inputs = self.code_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
+        outputs = self.code_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
+        generated_text = self.code_tokenizer.decode(outputs[0], skip_special_tokens=True)
         return generated_text
 
     def refine_research_goal(self, initial_goal):
@@ -57,7 +65,7 @@ class Researcher:
         return self.generate_text(prompt)
 
     def generate_research_question(self, paper_text):
-        prompt = f"Based on the following paper, generate research questions:\n\n{paper_text}"
+        prompt = f"Based on the following paper, generate research a new question to pursue:\n\n{paper_text}"
         return self.generate_text(prompt)
 
     def generate_research_plan(self, research_question):
@@ -68,7 +76,7 @@ class Researcher:
 
     def generate_experiment_script(self, research_plan):
         prompt = f"""
-        Based on the following research plan, generate a Python script for conducting the experiment:
+        Based on the following research plan, generate a Python script to conduct the experiment output the findings:
         {research_plan}
         """
         return self.generate_text(prompt)
@@ -86,20 +94,26 @@ class Researcher:
     def save_and_execute_script(self, script, filename="experiment.py"):
         with open(filename, 'w') as file:
             file.write(script)
-        result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
-        output_filename = filename.replace('.py', '_output.txt')
-        with open(output_filename, 'w') as output_file:
-            output_file.write(result.stdout)
-        print(f"Results of {filename}:\n{result.stdout}")
+        try:
+            result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
+            output_filename = filename.replace('.py', '_output.txt')
+            with open(output_filename, 'w') as output_file:
+                output_file.write(result.stdout)
+            print(f"Results of {filename}:\n{result.stdout}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing {filename}:")
+            print(e.stderr)  
+            output_filename = filename.replace('.py', '_error.txt')
+            with open(output_filename, 'w') as error_file:
+                error_file.write(e.stderr)  # Save error output for examination - not used now 
+            return None  # or raise e
         return output_filename
 
     def analyze_and_refine_question(self, research_plans, experiment_scripts, experiment_outputs, iteration):
-        # Access the current iteration's research plan, experiment script, and output
         research_plan_content = research_plans[iteration]
         experiment_script_content = experiment_scripts[iteration]
         output_content = experiment_outputs[iteration]
 
-        # Generate a prompt for the LLM that includes the contents and asks for refinement suggestions
         prompt = (
             f"Research Plan:\n{research_plan_content}\n\n"
             f"Experiment Script:\n{experiment_script_content}\n\n"
@@ -108,30 +122,35 @@ class Researcher:
             "how should the research question be refined to better align with the observed results and insights?"
         )
 
-        # Use the LLM to generate a refined research question or direction
         refined_question = self.generate_text(prompt)
         return refined_question
-
 
 def main(topic):
     researcher = Researcher()
     iterations = 3 
 
-    research_questions = [topic] 
+    research_questions = [] 
     research_plans = []
     experiment_scripts = []
     experiment_outputs = []
 
+    paper_details = researcher.search_arxiv(topic)
+    if 'pdf_link' in paper_details:
+        full_text = researcher.scrape_pdf_content(paper_details['pdf_link'])
+    else:
+        full_text = paper_details['summary']
+    initial_research_question = researcher.generate_research_question(full_text)
+    print(f"Topic:{topic}\n\n\nInitial RQ: {initial_research_question}")
+    research_questions.append(initial_research_question)
+
     for iteration in range(iterations):
         print(f"Iteration {iteration+1} of {iterations}")
 
-        if iteration == 0:
-            research_question = researcher.generate_research_question(topic)
-        else:
+        if iteration > 0:
             refined_question = researcher.analyze_and_refine_question(research_plans, experiment_scripts, experiment_outputs, iteration - 1)
             research_question = refined_question
-
-        research_questions.append(research_question)
+        else:
+            research_question = initial_research_question
 
         research_plan = researcher.generate_research_plan(research_question)
         research_plans.append(research_plan)
