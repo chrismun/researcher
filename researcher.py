@@ -1,18 +1,40 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+#from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+
+from langchain.llms import LlamaCpp
+from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+
 from xml.etree import ElementTree
 import fitz  # PyMuPDF
 import subprocess
 import requests
 
+import re
+
+n_gpu_layers = 1  # Metal set to 1 is enough.
+n_batch = 4096  # Should be between 1 and n_ctx, consider the amount of RAM of your Apple Silicon Chip.
+callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
+
 class Researcher:
     def __init__(self, model_path="vicgalle/Mixtral-7Bx2-truthy", code_model_path="Phind/Phind-CodeLlama-34B-v2", maxlen=1024):
         self.model_path = model_path
         self.maxlen = maxlen
-        self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
-        self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
-        self.code_model = AutoModelForCausalLM.from_pretrained(code_model_path, device_map='auto')
-        set_seed(42)
+
+        self.language_model = LlamaCpp(
+            model_path="/path/to/model/model.gguf",
+            n_gpu_layers=n_gpu_layers,
+            n_batch=n_batch,
+            n_ctx=4096,
+            f16_kv=True,  # MUST set to True, otherwise you will run into problem after a couple of calls
+            callback_manager=callback_manager,
+            verbose=True,
+        )
+
+        #self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
+        #self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
+        #self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
+        #self.code_model = AutoModelForCausalLM.from_pretrained(code_model_path, device_map='auto')
+        #set_seed(42)
 
     def read_file_contents(self, filename):
         with open(filename, 'r', encoding='utf-8') as file:
@@ -49,9 +71,9 @@ class Researcher:
         return text
 
     def generate_text(self, prompt):
-        inputs = self.language_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
-        outputs = self.language_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
-        generated_text = self.language_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        #inputs = self.language_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
+        #outputs = self.language_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
+        generated_text = self.language_model(prompt)
         return generated_text
     
     def generate_code(self, prompt):
@@ -75,10 +97,20 @@ class Researcher:
         return self.generate_text(prompt)
 
     def generate_experiment_script(self, research_plan):
+        #        First think through the pieces of the code step by step to yourself, and then write them as comments in the code block as you generate the code.
         prompt = f"""
-        Based on the following research plan, generate a Python script to conduct the experiment output the findings:
+
+        You are an expert Python developer who writes perfect Python scripts from a given research plan.
+
+        Based on the following research plan:
+
         {research_plan}
+
+        Generate a Python script to conduct the experiment and display the findings. 
+        Return a block of valid executable Python code wrapped in <code> tags and nothing else in your response, only code:
+
         """
+
         return self.generate_text(prompt)
 
     def process_paper(self, topic):
@@ -95,7 +127,7 @@ class Researcher:
         with open(filename, 'w') as file:
             file.write(script)
         try:
-            result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
+            result = subprocess.run(["python3", filename], capture_output=True, text=True, check=True)
             output_filename = filename.replace('.py', '_output.txt')
             with open(output_filename, 'w') as output_file:
                 output_file.write(result.stdout)
@@ -135,10 +167,13 @@ def main(topic):
     experiment_outputs = []
 
     paper_details = researcher.search_arxiv(topic)
-    if 'pdf_link' in paper_details:
-        full_text = researcher.scrape_pdf_content(paper_details['pdf_link'])
-    else:
-        full_text = paper_details['summary']
+    #if 'pdf_link' in paper_details:
+        #full_text = researcher.scrape_pdf_content(paper_details['pdf_link'])
+    #else:
+    full_text = paper_details['summary']
+
+    print(full_text)
+
     initial_research_question = researcher.generate_research_question(full_text)
     print(f"Topic:{topic}\n\n\nInitial RQ: {initial_research_question}")
     research_questions.append(initial_research_question)
@@ -156,9 +191,13 @@ def main(topic):
         research_plans.append(research_plan)
 
         experiment_script = researcher.generate_experiment_script(research_plan)
+
+        #reg_str = "<code>(.*?)</code>"
+        #result = re.findall(reg_str, experiment_script)
+
         experiment_scripts.append(experiment_script)
 
-        output_filename = researcher.save_and_execute_script(experiment_script)  
+        output_filename = researcher.save_and_execute_script(str(experiment_script))  
         experiment_outputs.append(output_filename)
 
     paper_sections = {
@@ -178,5 +217,5 @@ def main(topic):
         file.write(research_paper)
 
 if __name__ == "__main__":
-    topic = "OpenACC Validation and Verification"
+    topic = "Sorting Algorithms"
     main(topic)
