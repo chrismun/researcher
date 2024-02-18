@@ -20,22 +20,25 @@ class Researcher:
         with open(filename, 'r', encoding='utf-8') as file:
             return file.read()
 
-    def search_arxiv(self, keywords):
-        query = '+AND+'.join(keywords.split())
-        url = f'http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=1'
-        response = requests.get(url)
-        root = ElementTree.fromstring(response.content)
-        paper_details = {}
+def search_arxiv(self, keywords):
+    query = '+AND+'.join(keywords.split())
+    url = f'http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=10'  # Fetch top 10 results
+    response = requests.get(url)
+    root = ElementTree.fromstring(response.content)
+    papers_details = []
 
-        for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
-            paper_details['title'] = entry.find('{http://www.w3.org/2005/Atom}title').text
-            paper_details['summary'] = entry.find('{http://www.w3.org/2005/Atom}summary').text
-            for link in entry.findall('{http://www.w3.org/2005/Atom}link'):
-                if link.attrib.get('title') == 'pdf':
-                    paper_details['pdf_link'] = link.attrib['href'] + ".pdf"
-                    break
+    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+        paper_detail = {
+            'title': entry.find('{http://www.w3.org/2005/Atom}title').text,
+            'summary': entry.find('{http://www.w3.org/2005/Atom}summary').text,
+            'pdf_link': None  # Initialize pdf_link as None
+        }
+        for link in entry.findall('{http://www.w3.org/2005/Atom}link'):
+            if link.attrib.get('rel') == 'alternate' and link.attrib['type'] == 'text/html':
+                paper_detail['pdf_link'] = link.attrib['href'].replace('abs', 'pdf') + ".pdf"  # Adjusted to fetch PDF link correctly
+        papers_details.append(paper_detail)
 
-        return paper_details
+    return papers_details
 
     def scrape_pdf_content(self, pdf_url):
         response = requests.get(pdf_url)
@@ -166,7 +169,7 @@ class Researcher:
         refined_question = self.generate_text(prompt)
         return refined_question
 
-        
+
 def process_single_paper(researcher, paper_detail):
     print(f"Processing paper: {paper_detail['title']}\n")
     full_text = researcher.scrape_pdf_content(paper_detail['pdf_link']) if 'pdf_link' in paper_detail else paper_detail['summary']
