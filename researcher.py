@@ -10,6 +10,7 @@ import subprocess
 import requests
 
 import re
+import time
 
 n_gpu_layers = 1  # Metal set to 1 is enough.
 n_batch = 4096  # Should be between 1 and n_ctx, consider the amount of RAM of your Apple Silicon Chip.
@@ -24,17 +25,12 @@ class Researcher:
             model_path="/path/to/model/model.gguf",
             n_gpu_layers=n_gpu_layers,
             n_batch=n_batch,
-            n_ctx=4096,
+            n_ctx=8192,
             f16_kv=True,  # MUST set to True, otherwise you will run into problem after a couple of calls
             callback_manager=callback_manager,
-            verbose=True,
+            verbose=False,
+            echo=False
         )
-
-        #self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
-        #self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
-        #self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
-        #self.code_model = AutoModelForCausalLM.from_pretrained(code_model_path, device_map='auto')
-        #set_seed(42)
 
     def read_file_contents(self, filename):
         with open(filename, 'r', encoding='utf-8') as file:
@@ -71,15 +67,7 @@ class Researcher:
         return text
 
     def generate_text(self, prompt):
-        #inputs = self.language_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
-        #outputs = self.language_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
         generated_text = self.language_model(prompt)
-        return generated_text
-    
-    def generate_code(self, prompt):
-        inputs = self.code_tokenizer(prompt, return_tensors="pt", max_length=self.maxlen, truncation=True)
-        outputs = self.code_model.generate(**inputs, max_length=self.maxlen, num_return_sequences=1)
-        generated_text = self.code_tokenizer.decode(outputs[0], skip_special_tokens=True)
         return generated_text
 
     def refine_research_goal(self, initial_goal):
@@ -92,24 +80,28 @@ class Researcher:
 
     def generate_research_plan(self, research_question):
         prompt = f"""
-        Given the research question: "{research_question}", generate a detailed research plan. The plan should outline the objectives, methodologies, tools, datasets, and evaluation metrics.
+        Given the research question: "{research_question}", generate a steps for a research plan. The steps should outline the objectives, methodologies using Python, tools, datasets, and evaluation metrics. Be concise in your answer.
         """
         return self.generate_text(prompt)
 
     def generate_experiment_script(self, research_plan):
         #        First think through the pieces of the code step by step to yourself, and then write them as comments in the code block as you generate the code.
+        #        Do not return the steps of the research plan nor the code in the example provided.
         prompt = f"""
 
-        You are an expert Python developer who writes perfect Python scripts from a given research plan.
+        You are an expert Python developer who writes perfect Python scripts from a provided research plan.
 
         Based on the following research plan:
 
         {research_plan}
 
-        Generate a Python script to conduct the experiment and display the findings. 
-        Return a block of valid executable Python code wrapped in <code> tags and nothing else in your response, only code:
+        Generate a Python script to conduct the experiment and display the findings.  Do not include English words, comments, line numbers or any more than one newline per line.
+        Return only a block of syntacticaly valid, complete Python code to implement the experiment in your response.
 
+        Response:
         """
+
+        print("\n###### CODE #######")
 
         return self.generate_text(prompt)
 
@@ -167,12 +159,7 @@ def main(topic):
     experiment_outputs = []
 
     paper_details = researcher.search_arxiv(topic)
-    #if 'pdf_link' in paper_details:
-        #full_text = researcher.scrape_pdf_content(paper_details['pdf_link'])
-    #else:
     full_text = paper_details['summary']
-
-    print(full_text)
 
     initial_research_question = researcher.generate_research_question(full_text)
     print(f"Topic:{topic}\n\n\nInitial RQ: {initial_research_question}")
@@ -190,10 +177,9 @@ def main(topic):
         research_plan = researcher.generate_research_plan(research_question)
         research_plans.append(research_plan)
 
-        experiment_script = researcher.generate_experiment_script(research_plan)
+        time.sleep(10)
 
-        #reg_str = "<code>(.*?)</code>"
-        #result = re.findall(reg_str, experiment_script)
+        experiment_script = researcher.generate_experiment_script(research_plan)
 
         experiment_scripts.append(experiment_script)
 
