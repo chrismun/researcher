@@ -7,7 +7,7 @@ import requests
 import re 
 
 class Researcher:
-    def __init__(self, model_path="meta-llama/Llama-2-13b-chat-hf", code_model_path="Phind/Phind-CodeLlama-34B-v2", maxlen=4098):
+    def __init__(self, model_path="meta-llama/Llama-2-13b-chat-hf", code_model_path="Phind/Phind-CodeLlama-34B-v2", maxlen=5000):
         self.model_path = model_path
         self.maxlen = maxlen
         self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -88,9 +88,16 @@ class Researcher:
         """
         return self.generate_text(prompt)
 
+    def generate_experiment_plan(self, research_plan):
+        prompt = f"""
+        Based on the following research plan, generate a detailed plan for conducting the experiment. The plan should outline specific objectives, methodologies, tools, datasets to be used, expected outcomes, and evaluation metrics.\n\n
+        {research_plan}
+        """
+        return self.generate_text(prompt)
+
     def generate_experiment_script(self, research_plan):
         prompt = f"""
-        Based on the following research plan, generate a Python script to conduct the experiment. Note that you dont have access to any previous data unless you explicitly retrieve it. Output the findings. Surround the code in backticks.\n\n
+        Based on the following experiment plan, generate a Python script to conduct the experiment. Note that you dont have access to any previous data unless you explicitly retrieve it. Output the findings. Surround the code in backticks.\n\n
         {research_plan}
         
         IMPORTANT: Generate your own data, there are no csv files available.
@@ -159,59 +166,51 @@ class Researcher:
         refined_question = self.generate_text(prompt)
         return refined_question
 
-def main(topic):
-    researcher = Researcher()
-    iterations = 3 
-
-    research_questions = [] 
-    research_plans = []
-    experiment_scripts = []
-    experiment_outputs = []
-
-    paper_details = researcher.search_arxiv(topic)
-    if 'pdf_link' in paper_details and False:
-        full_text = researcher.scrape_pdf_content(paper_details['pdf_link'])
-    else:
-        full_text = paper_details['summary']
-    initial_research_question = researcher.generate_research_question(full_text)
-    print(colored(f"##### Topic:{topic}\n\n\n##### Initial RQ: {initial_research_question}", "red"))
-    research_questions.append(initial_research_question)
+        
+def process_single_paper(researcher, paper_detail):
+    print(f"Processing paper: {paper_detail['title']}\n")
+    full_text = researcher.scrape_pdf_content(paper_detail['pdf_link']) if 'pdf_link' in paper_detail else paper_detail['summary']
+    
+    iterations = 3
+    research_questions, research_plans, experiment_scripts, experiment_outputs = [], [], [], []
 
     for iteration in range(iterations):
-        print(f"##### Iteration {iteration+1} of {iterations}")
-
-        if iteration > 0:
-            refined_question = researcher.analyze_and_refine_question(research_plans, experiment_scripts, experiment_outputs, iteration - 1)
-            research_question = refined_question
+        if iteration == 0:
+            research_question = researcher.generate_research_question(full_text)
         else:
-            research_question = initial_research_question
+            research_question = researcher.analyze_and_refine_question(research_plans, experiment_scripts, experiment_outputs, iteration - 1)
 
         research_plan = researcher.generate_research_plan(research_question)
-        print(colored(f"##### Research Plan: {research_plan}\n\n", "blue"))
-        research_plans.append(research_plan)
-
         experiment_script = researcher.generate_experiment_script(research_plan)
-        print(colored(F"##### Experiment Script: {experiment_script}", "green"))
-        experiment_scripts.append(experiment_script)
+        output_filename = researcher.save_and_execute_script(experiment_script)
 
-        output_filename = researcher.save_and_execute_script(experiment_script)  
+        research_questions.append(research_question)
+        research_plans.append(research_plan)
+        experiment_scripts.append(experiment_script)
         experiment_outputs.append(output_filename)
 
     paper_sections = {
-        "Introduction": "This paper explores the topic of " + topic + ".",
+        "Introduction": f"This paper explores findings related to: {paper_detail['title']}.",
         "Literature Review": "\n\n".join(research_questions),
         "Methodology": "\n\n".join(research_plans),
         "Experiments and Results": "\n\n".join(experiment_scripts),
-        "Discussion": "This section discusses the implications of the findings.",
-        "Conclusion": "Here we conclude our findings and propose future work based on the experiments conducted."
+        "Discussion": "This section discusses the implications of our findings.",
+        "Conclusion": "We conclude our findings and propose future work."
     }
 
     research_paper = "\n\n".join([f"{section}:\n{content}" for section, content in paper_sections.items()])
-    print("\nFinal Research Paper Draft:\n")
-    print(research_paper)
-
-    with open("research_paper.txt", "w") as file:
+    paper_title = paper_detail['title'].replace(' ', '_').replace('/', '_')
+    filename = f"research_paper_{paper_title}.txt"
+    with open(filename, "w") as file:
         file.write(research_paper)
+    print(f"Research paper for '{paper_detail['title']}' saved as '{filename}'\n")
+
+def main(topic):
+    researcher = Researcher()
+    papers_details = researcher.search_arxiv(topic)
+
+    for paper_detail in papers_details:
+        process_single_paper(researcher, paper_detail)
 
 if __name__ == "__main__":
     topic = "OpenACC Validation and Verification"
