@@ -1,26 +1,48 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed, LlamaForCausalLM
+from transformers import AutoTokenizer, set_seed
 from xml.etree import ElementTree
 from termcolor import colored
-import torch
 import fitz  # PyMuPDF
 import subprocess
 import requests
-import re 
+import re
 
-# lmodel = "meta-llama/Llama-2-70b-chat-hf"
-# lmodel = "togethercomputer/LLaMA-2-7B-32K"
-lmodel = "mistralai/Mixtral-8x7B-v0.1"
-cmodel = "Phind/Phind-CodeLlama-34B-v2"
+from langchain.llms import LlamaCpp
+from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+
 
 class Researcher:
-    def __init__(self, model_path=lmodel, code_model_path=cmodel, maxlen=6000):
+    def __init__(self, model_path="/path/to/model/model.gguf", code_model_path="Phind/Phind-CodeLlama-34B-v2", maxlen=8192, n_gpu_layers=1, n_batch=4096):
         self.model_path = model_path
         self.maxlen = maxlen
+        self.code_model_path = code_model_path
         self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.float16, attn_implementation="flash_attention_2")
-        # self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
-        # self.code_model = LlamaForCausalLM.from_pretrained(code_model_path, device_map="auto", torch_dtype=torch.float16, attn_implementation="flash_attention_2")
+        self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
         set_seed(42)
+        
+        callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
+        
+        self.language_model = LlamaCpp(
+            model_path=model_path,
+            n_gpu_layers=n_gpu_layers,
+            n_batch=n_batch,
+            n_ctx=self.maxlen,
+            f16_kv=True,
+            callback_manager=callback_manager,
+            verbose=False,
+            echo=False
+        )
+
+        self.code_model = LlamaCpp(
+            model_path=code_model_path,
+            n_gpu_layers=n_gpu_layers,
+            n_batch=n_batch,
+            n_ctx=self.maxlen,
+            f16_kv=True,
+            callback_manager=callback_manager,
+            verbose=False,
+            echo=False
+        )
 
     def read_file_contents(self, filename):
         with open(filename, 'r', encoding='utf-8') as file:
@@ -92,13 +114,13 @@ class Researcher:
 
     def generate_research_plan(self, research_question):
         prompt = f"""
-Given the research question: "{research_question}", generate a detailed research plan. The plan should outline the objectives, methodologies, tools, datasets, and evaluation metrics. The plan should be computational, done by an intelligent agent automatically.
+Given the research question: "{research_question}", generate a detailed research plan. The plan should outline the objectives, methodologies, tools, datasets, and evaluation metrics.
 """
         return self.generate_text(prompt)
 
     def generate_experiment_plan(self, research_plan):
         prompt = f"""
-Based on the following research plan, generate a detailed plan for conducting the experiment. The plan should outline specific objectives, methodologies, tools, datasets to be used, expected outcomes, and evaluation metrics. It should be a plan for a python script, using ML or simulation or other techniques. The plan should be computational, done by an intelligent agent automatically.\n\n
+Based on the following research plan, generate a detailed plan for conducting the experiment. The plan should outline specific objectives, methodologies, tools, datasets to be used, expected outcomes, and evaluation metrics. It should be a plan for a python script, using ML or simulation or other techniques.\n\n
 {research_plan}
 """
         return self.generate_text(prompt)
@@ -111,8 +133,7 @@ Based on the following experiment plan, generate a Python script to conduct the 
 IMPORTANT: Generate your own data, there are no csv files available.
 """
         print(prompt)
-        return self.generate_text(prompt)
-        # return self.generate_one_completion(prompt)
+        return self.generate_one_completion(prompt)
 
     def process_paper(self, topic):
         paper_details = self.search_arxiv(topic)
@@ -180,7 +201,7 @@ def process_single_paper(researcher, paper_detail):
     print(colored(f"Processing paper: {paper_detail['title']}", 'yellow'))
     full_text = researcher.scrape_pdf_content(paper_detail['pdf_link']) if 'pdf_link' in paper_detail and False else paper_detail['summary']
     
-    iterations = 1
+    iterations = 3
     research_questions, research_plans, experiment_scripts, experiment_outputs = [], [], [], []
 
     for iteration in range(iterations):
