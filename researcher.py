@@ -165,7 +165,7 @@ Include data generation or retrieval in the script. Use torch for any machine le
 
             try:
                 result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
-                print("code output: ", result.stduout)
+                print("code output: ", result.stdout)
                 output_filename = filename.replace('.py', '_output.txt')
                 with open(output_filename, 'w') as output_file:
                     output_file.write(result.stdout)
@@ -210,7 +210,7 @@ Include data generation or retrieval in the script. Use torch for any machine le
 
     def generate_structured_abstract(self, research_question):
         prompt = f"Generate a structured abstract highlighting the objectives, methods, results, and conclusions based on the research question: '{research_question}'."
-        structured_abstract = self.generate_text(prompt, max_length=1024)
+        structured_abstract = self.generate_text(prompt)
         return structured_abstract
 
     def generate_research_paper(self, paper_detail, research_question, research_plan, experiment_script, experiment_output):
@@ -250,7 +250,7 @@ Include data generation or retrieval in the script. Use torch for any machine le
         return refined_paper
     
     def refine_research_paper(self, research_paper):
-        prompt = f"Refine the following research paper for better cohesiveness, clarity, and academic tone: \n\n{research_paper}"
+        prompt = f"Refine the following research paper for better cohesiveness, clarity, and academic tone. Rewrite the entire paper, top two bottom. Make a two page report. \n\n{research_paper}"
         refined_paper = self.generate_text(prompt)  
         return refined_paper
 
