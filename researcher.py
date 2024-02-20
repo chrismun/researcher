@@ -27,6 +27,13 @@ class Researcher:
         with open(filename, 'r', encoding='utf-8') as file:
             return file.read()
 
+    def read_output_file(self, filename):
+        try:
+            with open(filename, 'r') as file:
+                return file.read()
+        except FileNotFoundError:
+            return "Experiment output could not be read."
+
     def search_arxiv(self, keywords):
         query = '+AND+'.join(keywords.split())
         url = f'http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=10'  
@@ -119,8 +126,6 @@ If data is needed, the script must generate this data programmatically or retrie
 Include data generation or retrieval in the script. Use torch for any machine learning tasks.\n\n{research_plan}
 
 """
-        # print(prompt)
-        # return self.generate_code(prompt)
         return self.generate_one_completion(prompt)
 
     def process_paper(self, topic):
@@ -186,7 +191,6 @@ Include data generation or retrieval in the script. Use torch for any machine le
             return None
 
 
-
     def analyze_and_refine_question(self, research_plans, experiment_scripts, experiment_outputs, iteration):
         research_plan_content = research_plans[iteration]
         experiment_script_content = experiment_scripts[iteration]
@@ -202,6 +206,57 @@ Include data generation or retrieval in the script. Use torch for any machine le
 
         refined_question = self.generate_text(prompt)
         return refined_question
+
+    def generate_structured_abstract(self, research_question):
+        prompt = f"Generate a structured abstract highlighting the objectives, methods, results, and conclusions based on the research question: '{research_question}'."
+        structured_abstract = self.generate_text(prompt, max_length=1024)
+        return structured_abstract
+
+    def generate_research_paper(self, paper_detail, research_question, research_plan, experiment_script, experiment_output):
+        # Read the experiment output content
+        experiment_output_content = self.read_output_file(experiment_output)
+        
+        # Generate a structured abstract
+        structured_abstract = self.generate_structured_abstract(research_question)
+
+        # Templates for each section with experiment output included
+        introduction = f"This paper investigates {paper_detail['title']} motivated by {research_question}."
+        methodology = f"The methodology adopted is based on the following plan: {research_plan}."
+        experiment_results = f"The results of the experiment are detailed as follows:\n{experiment_output_content}"
+        discussion = "This study contributes to the understanding of [specific field or question]."
+        conclusion = "In conclusion, [summary of findings and suggestions for future research]."
+        
+        # Combine all sections
+        research_paper = f"""
+        Title: {paper_detail['title']}
+        
+        Abstract: 
+        {structured_abstract}
+        
+        Introduction:
+        {introduction}
+        
+        Methodology:
+        {methodology}
+        
+        Experiment Results:
+        {experiment_results}
+        
+        Discussion:
+        {discussion}
+        
+        Conclusion:
+        {conclusion}
+        """
+        
+        # Refine the research paper
+        refined_paper = self.refine_research_paper(research_paper)
+        return refined_paper
+    
+    def refine_research_paper(self, research_paper):
+        prompt = f"Refine the following research paper for better cohesiveness, clarity, and academic tone: \n\n{research_paper}"
+        refined_paper = self.generate_text(prompt, max_length=5000)  # Adjust max_length as necessary
+        return refined_paper
 
 
 def process_single_paper(researcher, paper_detail):
@@ -260,6 +315,7 @@ def main(topic):
         process_single_paper(researcher, paper_detail)
 
 if __name__ == "__main__":
-    topic = "OpenACC Validation and Verification"
+    # topic = "OpenACC Validation and Verification"
     # topic = "quantum mechanics"
+    topic = "LLM"
     main(topic)
