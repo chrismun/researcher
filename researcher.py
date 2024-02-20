@@ -6,20 +6,21 @@ import fitz  # PyMuPDF
 import subprocess
 import requests
 import re 
+import black 
 
-# lmodel = "meta-llama/Llama-2-70b-chat-hf"
+lmodel = "meta-llama/Llama-2-13b-chat-hf"
 # lmodel = "togethercomputer/LLaMA-2-7B-32K"
-lmodel = "mistralai/Mixtral-8x7B-v0.1"
+# lmodel = "mistralai/Mixtral-8x7B-v0.1"
 cmodel = "Phind/Phind-CodeLlama-34B-v2"
 
 class Researcher:
-    def __init__(self, model_path=lmodel, code_model_path=cmodel, maxlen=6000):
+    def __init__(self, model_path=lmodel, code_model_path=cmodel, maxlen=4192):
         self.model_path = model_path
         self.maxlen = maxlen
         self.language_tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.float16, attn_implementation="flash_attention_2")
-        # self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
-        # self.code_model = LlamaForCausalLM.from_pretrained(code_model_path, device_map="auto", torch_dtype=torch.float16, attn_implementation="flash_attention_2")
+        self.language_model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', attn_implementation="flash_attention_2", load_in_8bit=True)
+        self.code_tokenizer = AutoTokenizer.from_pretrained(code_model_path)
+        self.code_model = LlamaForCausalLM.from_pretrained(code_model_path, device_map="auto", torch_dtype=torch.float16, attn_implementation="flash_attention_2")
         set_seed(42)
 
     def read_file_contents(self, filename):
@@ -93,26 +94,34 @@ class Researcher:
     def generate_research_plan(self, research_question):
         prompt = f"""
 Given the research question: "{research_question}", generate a detailed research plan. The plan should outline the objectives, methodologies, tools, datasets, and evaluation metrics. The plan should be computational, done by an intelligent agent automatically.
-"""
+Make the research plan brief, under 500 words. It should all be implmentable in code."""
         return self.generate_text(prompt)
 
     def generate_experiment_plan(self, research_plan):
         prompt = f"""
-Based on the following research plan, generate a detailed plan for conducting the experiment. The plan should outline specific objectives, methodologies, tools, datasets to be used, expected outcomes, and evaluation metrics. It should be a plan for a python script, using ML or simulation or other techniques. The plan should be computational, done by an intelligent agent automatically.\n\n
+Based on the following research plan, generate a plan for writing a python script to the experiment. \n\n
 {research_plan}
 """
         return self.generate_text(prompt)
 
     def generate_experiment_script(self, research_plan):
         prompt = f"""
-Based on the following experiment plan, generate a Python script to conduct the experiment. Note that you dont have access to any previous data unless you explicitly retrieve it. Output the findings. Surround the code in backticks.\n\n
+Based on the following experiment plan, generate a Python script to conduct the experiment. Note that you dont have access to any previous data unless you explicitly retrieve it. Output the findings. Surround the code in backticks. If using ML, use torch.\n\n
 {research_plan}
 
 IMPORTANT: Generate your own data, there are no csv files available.
 """
-        print(prompt)
-        return self.generate_text(prompt)
-        # return self.generate_one_completion(prompt)
+
+        prompt = f"""
+Based on the following research plan, generate a Python script to conduct the experiment. 
+The script should not assume access to any pre-existing data files or databases. 
+If data is needed, the script must generate this data programmatically or retrieve it from a known and accessible source. 
+Include data generation or retrieval in the script. Use torch for any machine learning tasks.\n\n{research_plan}
+
+"""
+        # print(prompt)
+        # return self.generate_code(prompt)
+        return self.generate_one_completion(prompt)
 
     def process_paper(self, topic):
         paper_details = self.search_arxiv(topic)
@@ -124,40 +133,59 @@ IMPORTANT: Generate your own data, there are no csv files available.
 
         print(f"Paper and Summary: {paper_details}\n\nRefined Goal: {refined_goal}\n\nResearch Question: {research_question}\n\nResearch Plan: {research_plan}\n\nExperiment Script: {experiment_script}")
 
+    def format_code_with_black(self, code: str) -> str:
+        mode = black.FileMode()
+        try:
+            formatted_code = black.format_str(code, mode=mode)
+            return formatted_code
+        except black.NothingChanged:
+            return code
 
-    def save_and_execute_script(self, script, filename="experiment.py"):
+    def generate_fix(self, script, error_message):
+        prompt = f"Here is a script that resulted in errors:\n{script}\nErrors:\n{error_message}\nPlease create a fixed version of the script. You can use inline pip install"
+        fixed_script = self.generate_one_completion(prompt) 
+        return fixed_script
+
+
+    def save_and_execute_script(self, script, filename="experiment.py", attempt_fix=True):
         code_pattern = r"```python(.*?)```"
         code_match = re.search(code_pattern, script, re.DOTALL)
         
         if code_match:
             code_to_execute = code_match.group(1)
-            lines = code_to_execute.split('\n')
-            stripped_lines = [line.strip() for line in lines]
-            code_to_execute = '\n'.join(stripped_lines)
+            formatted_code_to_execute = self.format_code_with_black(code_to_execute)
+            
+            with open(filename, 'w') as file:
+                file.write(formatted_code_to_execute)
+
+            try:
+                result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
+                output_filename = filename.replace('.py', '_output.txt')
+                with open(output_filename, 'w') as output_file:
+                    output_file.write(result.stdout)
+                print(f"##### Output saved at {output_filename}")
+                
+                return output_filename
+            except subprocess.CalledProcessError as e:
+                if attempt_fix:
+                    print("Attempting to fix the script based on errors...")
+                    fixed_script = self.generate_fix(script, e.stderr)
+                    fixed_filename = "fixed_" + filename
+                    return self.save_and_execute_script(fixed_script, fixed_filename, attempt_fix=False) 
+                else:
+                    formatted_error = f"```\n{e.stderr}\n```"
+                    print(formatted_error)
+                    
+                    output_filename = filename.replace('.py', '_error.txt')
+                    with open(output_filename, 'w') as error_file:
+                        error_file.write(formatted_error)
+                    
+                    return None
         else:
             print("No code found within backticks.")
             return None
 
-        with open(filename, 'w') as file:
-            file.write(code_to_execute)
 
-        try:
-            result = subprocess.run(["python", filename], capture_output=True, text=True, check=True)
-            output_filename = filename.replace('.py', '_output.txt')
-            with open(output_filename, 'w') as output_file:
-                output_file.write(result.stdout)
-            print(f"##### Output saved at {output_filename}")
-            
-        except subprocess.CalledProcessError as e:
-            formatted_error = f"```\n{e.stderr}\n```"
-            print(formatted_error)
-            
-            output_filename = filename.replace('.py', '_error.txt')
-            with open(output_filename, 'w') as error_file:
-                error_file.write(formatted_error)
-            
-            return None
-        return output_filename
 
     def analyze_and_refine_question(self, research_plans, experiment_scripts, experiment_outputs, iteration):
         research_plan_content = research_plans[iteration]
@@ -194,10 +222,10 @@ def process_single_paper(researcher, paper_detail):
         research_plan = researcher.generate_research_plan(research_question)
         print(colored(f"Research Plan: {research_plan}", 'blue'))
         
-        experiment_plan = researcher.generate_experiment_plan(research_plan)
-        print(colored(f"Experiment Plan: {experiment_plan}", 'yellow'))
+        # experiment_plan = researcher.generate_experiment_plan(research_plan)
+        # print(colored(f"Experiment Plan: {experiment_plan}", 'yellow'))
 
-        experiment_script = researcher.generate_experiment_script(experiment_plan)
+        experiment_script = researcher.generate_experiment_script(research_plan)
         print(colored(f"Experiment Script: {experiment_script}", 'red'))
         
         output_filename = researcher.save_and_execute_script(experiment_script)
@@ -226,10 +254,12 @@ def process_single_paper(researcher, paper_detail):
 def main(topic):
     researcher = Researcher()
     papers_details = researcher.search_arxiv(topic)
-
+    print(papers_details)
+    print("NUM PAPERS: ", len(papers_details))
     for paper_detail in papers_details:
         process_single_paper(researcher, paper_detail)
 
 if __name__ == "__main__":
     topic = "OpenACC Validation and Verification"
+    # topic = "quantum mechanics"
     main(topic)
