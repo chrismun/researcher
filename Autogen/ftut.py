@@ -7,7 +7,7 @@ response = oai.Completion.create(
             "model": "chatglm2-6b",
             "base_url": "http://localhost:8000/v1",
             "api_type": "openai",
-            "api_key": "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", # just a placeholder
+            "api_key": "sk-", 
         }
     ],
     prompt="Hi",
@@ -21,7 +21,7 @@ response = oai.ChatCompletion.create(
             "model": "chatglm2-6b",
             "base_url": "http://localhost:8000/v1",
             "api_type": "openai",
-            "api_key": "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",
+            "api_key": "sk-",
         }
     ],
     messages=[{"role": "user", "content": "Hi"}]
