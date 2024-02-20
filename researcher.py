@@ -290,21 +290,20 @@ def process_single_paper(researcher, paper_detail):
         experiment_scripts.append(experiment_script)
         experiment_outputs.append(output_filename)
 
-    paper_sections = {
-        "Introduction": f"This paper explores findings related to: {paper_detail['title']}.",
-        "Literature Review": "\n\n".join(research_questions),
-        "Methodology": "\n\n".join(research_plans),
-        "Experiments and Results": "\n\n".join(experiment_scripts),
-        "Discussion": "This section discusses the implications of our findings.",
-        "Conclusion": "We conclude our findings and propose future work."
-    }
+    research_paper = researcher.generate_research_paper(
+        paper_detail,
+        research_question,
+        research_plan,
+        experiment_script,
+        experiment_outputs[-1]  
+    )
 
-    research_paper = "\n\n".join([f"{section}:\n{content}" for section, content in paper_sections.items()])
     paper_title = paper_detail['title'].replace(' ', '_').replace('/', '_').replace(':', '_')
     filename = f"research_paper_{paper_title}.txt"
     with open(filename, "w") as file:
         file.write(research_paper)
     print(colored(f"Research paper for '{paper_detail['title']}' saved as '{filename}'", 'cyan'))
+
 
 def main(topic):
     researcher = Researcher()
